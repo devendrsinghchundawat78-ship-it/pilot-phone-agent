@@ -1,0 +1,43 @@
+name: build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['*src.zip', '.github/workflows/build.yml']
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack source
+        run: unzip -o "$(ls *src.zip | head -1)" -d work
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+          cache-disabled: true
+      - name: Build
+        working-directory: work
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+      - name: Publish APK
+        run: |
+          cp work/app/build/outputs/apk/release/app-release.apk Pilot.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Pilot.apk --title "Pilot" --notes "Latest build ${{ github.run_number }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish log on failure
+        if: failure()
+        run: |
+          tail -c 60000 build.log > build-log.txt || echo "no log" > build-log.txt
+          gh release delete buildlog --yes --cleanup-tag || true
+          gh release create buildlog build-log.txt --title "build log" --notes "failed run ${{ github.run_number }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
